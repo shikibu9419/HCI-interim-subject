@@ -5,10 +5,9 @@ import "@babylonjs/loaders/glTF";
 import desktopModel from "../models/poly.glb?url";
 
 import csvDataUrl from "../data/gaze.csv?url";
-import { Vector3 } from "@babylonjs/core";
-console.log(csvDataUrl);
 
 const smartPhoneSize = { height: 145 / 1000, width: 70 / 1000 };
+const monitorSize = { height: 300 / 1000, width: 520 / 1000 };
 
 const reshape1d = <T>(array: T[], cols: number): T[][] => {
   const ret = [];
@@ -22,7 +21,11 @@ const transpose = <T>(array: T[][]): T[][] => array[0].map((_, i) => array.map((
 
 const sleep = (ms: number) => new Promise((s) => setTimeout(s, ms));
 
-const loadCSVData = async (scene: BABYLON.Scene, parent: BABYLON.Mesh) => {
+const loadCSVData = async (
+  scene: BABYLON.Scene,
+  cameraPlane: BABYLON.Mesh,
+  monitors: BABYLON.Mesh[]
+) => {
   const resBody = await fetch("/gaze.csv").then((res) => res.text());
   const data = resBody.split(/\r?\n/).map((row) => row.split(",").map((d) => parseFloat(d)));
 
@@ -51,7 +54,7 @@ const loadCSVData = async (scene: BABYLON.Scene, parent: BABYLON.Mesh) => {
   console.log(scale, rotationQuaternion, translation);
 
   const CoT = new BABYLON.TransformNode("root");
-  CoT.parent = parent;
+  CoT.parent = cameraPlane;
   CoT.scaling = new BABYLON.Vector3(-1, 1, 1); // To flip X axes of face
   const faceSphere = BABYLON.MeshBuilder.CreateSphere("face", { diameter: 0.2 }, scene);
   faceSphere.rotate(new BABYLON.Vector3(0, 0, 0), 0);
@@ -96,6 +99,13 @@ const loadCSVData = async (scene: BABYLON.Scene, parent: BABYLON.Mesh) => {
   rightEyeRayHelper.attachToMesh(rightEyeSphere, new BABYLON.Vector3(0, 0, 1));
   rightEyeRayHelper.show(scene);
 
+  const gazePoint = BABYLON.MeshBuilder.CreateSphere("gaze-point", { diameter: 0.05 }, scene);
+  //   gazePoint.parent = monitors[0];
+  const material = new BABYLON.StandardMaterial("red", scene);
+  material.alpha = 1;
+  material.diffuseColor = new BABYLON.Color3(1.0, 0.0, 0.0);
+  gazePoint.material = material;
+
   for (let i = 1; i < data.length - 1; i++) {
     const row = data[i];
 
@@ -121,6 +131,13 @@ const loadCSVData = async (scene: BABYLON.Scene, parent: BABYLON.Mesh) => {
       rightEyeSphere.rotationQuaternion || undefined,
       rightEyeSphere.position
     );
+
+    const targets = leftEyeRay.intersectsMeshes(monitors);
+    if (targets.length) {
+      targets.forEach((target) => {
+        gazePoint.position.copyFrom(target.pickedPoint || new BABYLON.Vector3(0, 0, 0));
+      });
+    }
 
     await sleep(data[i + 1][0] - row[0]);
   }
@@ -177,6 +194,18 @@ const createScene = function (canvas: HTMLCanvasElement, engine: BABYLON.Engine)
   const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
   light.intensity = 0.7;
 
+  const monitorPlane = BABYLON.MeshBuilder.CreatePlane(
+    "monitor",
+    { ...monitorSize, sideOrientation: 1 },
+    scene
+  );
+  monitorPlane.position = new BABYLON.Vector3(
+    150 / 1000,
+    250 / 1000 + monitorSize.height / 2,
+    230 / 1000
+  );
+  monitorPlane.rotation.y = (10 / 180) * Math.PI;
+
   const smartPhonePlane = BABYLON.MeshBuilder.CreatePlane(
     "smart-phone",
     { ...smartPhoneSize, sideOrientation: 1 },
@@ -197,7 +226,7 @@ const createScene = function (canvas: HTMLCanvasElement, engine: BABYLON.Engine)
   localAxes.yAxis.parent = smartPhonePlane;
   localAxes.zAxis.parent = smartPhonePlane;
 
-  loadCSVData(scene, smartPhonePlane);
+  loadCSVData(scene, smartPhonePlane, [monitorPlane]);
 
   return scene;
 };
